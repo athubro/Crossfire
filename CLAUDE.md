@@ -1,3 +1,125 @@
+## Farmstead map (2026-11-07)
+
+See docs/FARMSTEAD.md. Fourth map `farmstead` (plan: references_images/Newoutdoormap.png): an open farm yard with
+house, barn, cabin, garage, four open shacks, a gapped fence and a storm shelter underneath. Gameplay, protocol
+(WebSocket v21, HTTP schemas) and Cloudflare configuration are untouched; layouts, collision and map revisions are
+new, so frontend assets and Worker need a matching release when authorized (the schedule now reshuffles once per full
+pass over `MAP_IDS`; with three maps that was identical). The buildings are NOT street-block buildings: tools/
+farm_structures.py authors *elements* (walls with openings, slabs, stairs, rails, posts, roofs) and
+blender/scripts/lib/farmstead.py derives the mesh and the collision from them (tags `farm:<id>:<kind>`); roofs are
+visual only, each building has a solid ceiling slab at its eave. There are no doors: every gap is an open entry.
+Stairs need their upper-slab void to run the whole flight plus 1 m (a gun swung down a flight meets a slab
+otherwise) and a free approach at both ends; an entrance footprint (underground stairs) must never face a wall
+opening. The shelter is underground style `farm` (floor -3.5 m, tunnels offset so no long lane). Hedgerows
+(`hedge_long`, 3 m collider) cut the long eye-level lanes (limit 76.5 m for this open map in tests/mapOverhaul.test.ts)
+and close the outer strip; `collision_gen` now reads the play area per axis (the map is not square). Build:
+`python -B -I tools/layout_farm.py --write`, `node tools/run-blender.mjs --only props,farm`, then restore the tracked
+`__pycache__` (see the memory note) and run `npm test --prefix server` (it rebuilds the Worker bundle). Review shots:
+`node tools/farm-shots.mjs <url>`; tests: tests/farmstead.test.ts plus every shared `MAP_IDS` suite. No
+commit/push/deploy.
+
+## Melee trails, bigger underground spaces and posters (2026-11-07)
+
+See docs/UNDERGROUND_POSTERS.md and the newest docs/DUAL_DAGGERS.md section. Melee presentation
+only: shared/melee.ts timing, damage and the protocol are untouched. MeleeTrail.ts is cosmetic
+(strip along the tip path; first person slices attacking frames to 4 ms, third person samples
+per frame; Chromebook = one layer); keep MeleeView.sampleTrail's body/sway transform in the rig
+root's space (not camera space) and the head correction after the arm IK. The underground
+spaces are authored in tools/underground_layouts.py and built by blender/scripts/lib/underground.py:
+STYLES own floor_y/risers/run, rooms join the hall through door-connector rects (touching rects
+fuse), piers/blocks/decor/walks are validated by tools/check_underground.py and walked by
+tests/mapOverhaul.test.ts; the civic stair cannot start north of z = -12.2 and the cellar portals
+keep their 5.4 m length (a longer one broke a server sightline). Underground props have negative
+pos y: street-only code (tactical map, stair/bench tests) skips them. Posters: posters_fun atlas,
+BuildingGenerator.poster_pass/interior_posters never touch the shared random stream; docs/map-posters
+records them. Rebuild with layout tools, run-blender (restore tracked __pycache__ afterwards), then the
+server bundle (npm test --prefix server rebuilds it; a stale dist gave a false failure). No
+commit/push/deploy.
+
+## Weapon balance and sniper zoom (2026-11-07)
+
+See docs/WEAPON_BALANCE.md. Weapon.ts remains shared by frontend/Worker/Practice.
+AR: 630 RPM, authoritative integer base rolls 20-22; SMG: 64 rounds, 1122.7 RPM,
+11 damage (explicitly no inherited AR roll). Sniper: 4 rounds, temporary stronger
+camera/model recoil, 224 ms ADS, configurable local wheel zoom ~2.95-4.55x/default
+3.73x. Shotgun: 2 shells, 250 ms trigger interval, 220 ms between-shot pump,
+55% ADS pellet cone, doubled falloff distances; original shell reload and 600 ms
+empty-reload chamber stroke remain. ADS cone uses real authority gun state.
+Protocol v21 is required because v20 rejects ammo above 32. No new client combat
+claims or Durable Object migration. Preserve models/cosmetics and current melee.
+Release both frontend and Worker through the existing workflow when authorized.
+No commit, push or deployment performed.
+
+## Confirmed melee impact feedback (2026-11-07)
+
+See docs/MELEE_IMPACT.md. Keep Claude's current clips/timing and LimpBody intact.
+Positive authoritative contacts alone call shared meleeKnockback on Worker and
+Practice. Camera feedback is finite optical roll, never addRecoil or aim changes.
+MeleeFeedback deduplicates and rejects stale contacts; no impact cues on misses.
+Third-hit kills correlate through existing MeleeResult stage/victim life to a
+once-only swept DeathMotion boost. Protocol remains v20. Regenerate original
+swoosh/impact WAVs with tools/generate-melee-impact-audio.py. Frontend and Worker
+both need release when authorized; no commit/push/deploy performed.
+
+## Fast daggers, flourish and limp death (2026-11-07)
+
+See docs/DUAL_DAGGERS.md (newest section) and the top PROGRESS.md entry. Attacks are
+250/250/400 ms (stage 1/2 diagonals, stage 3 crossover); clip ids are unchanged.
+dagger_design.py remains the single source: edit poses there, regenerate, and keep
+shared/melee.ts equal to daggers.json (tests/meleeCombat.test.ts). Chain gates shorten
+the combo cycle to ~650 ms; retune them if melee DPS must stay as before. The animator
+blends from a frozen snapshot when interrupted mid-blend and plays cosmetic idle
+flourishes (6-12 s, guard only, cancelled by any input). Deaths use LimpBody
+(captureDeath on elimination, poseDeath each frame): do not restore the old additive
+poseDeath on a paused running pose. Verify with tools/melee-anim-test.mjs. No
+commit/push/deploy.
+
+## UI sounds, configurable magnets and Practice AI (2026-11-07)
+
+See docs/UI_SOUNDS_BOTS.md. UISounds owns delegated body-level audio (including
+crate overlays); do not restore per-button click sounds. AudioManager.playUI uses
+short cached buffers through SFX/master, gesture unlock and bounded voices.
+MagneticSlider is configurable, with index-based spring physics and discrete
+magnetic-snap events; Practice uses 0-5 and lobby shared ROOM_LIMITS 2-10.
+Intermediate uses existing BotBrain states; only its preference is saved. Bot
+throws use normal local held grenade input/charge/inventory, swept arc checks and
+per-bot plus shared cooldowns. Practice remains non-rewarding. Worker/protocol
+unchanged; no commit/push/deploy.
+
+## Unified menu header and magnetic slider (2026-11-07)
+
+See docs/MENU_HEADER_SLIDER.md. Keep one persistent UI.homeHeader and mount the real
+ChallengesPanel.account in it across Play/Shop/Locker/home Settings/Leaderboard.
+Do not duplicate gem/account state or restore page-specific header overlays/Back
+buttons. menu.css loads after motion.css; narrow navigation scrolls horizontally
+without shrinking its font. MagneticSlider keeps native integer range semantics
+with a separate spring-driven visual thumb, no idle RAF, and pointer/blur/navigation
+cleanup. Preserve ordinary panel scrolling and animation/focus breathing room.
+No combat, backend or purchase-rule changes. No commit/push/deploy.
+
+## Dual daggers gameplay integration (2026-11-06)
+
+See docs/MELEE_GAMEPLAY.md and the newest PROGRESS.md entry. The presentation-only
+handoff below is historical: gameplay, V binding, shared authoritative combat,
+Practice bots, network state/events, paired Locker skins and retry-safe crate grants
+are now implemented. Shared WebSocket protocol is v20; cosmetics HTTP remains v1.
+Preserve the original GLBs/clips, existing CharacterWeapon IK/blending and scoring
+pipeline. Timing compatibility is checked against daggers.json. No deployment.
+
+## Dual daggers (presentation, 2026-11-06)
+
+See docs/DUAL_DAGGERS.md. blender/melee/dagger_design.py is the single source: models,
+hold, clip keys and timing; generate_daggers.py writes public/assets/models/shared/melee/
+(two dagger GLBs, first-person arms cut from the player mesh on the same 26-joint rig,
+dagger_clips.glb of animated empties, daggers.json with timing and checkpoints). Hand
+poses are authored as position + blade hint + elbow + cock; knuckles derive from the
+runtime two-bone IK, so do not author knuckle directions. CharacterWeapon stays the only
+third-person pose system (melee layer via weapon.melee); MeleeView renders first person.
+Daggers are parented to hand bones via the inverse grip. No damage, input, sync,
+inventory or crate wiring exists; the combat layer (Codex) drives
+equip/attack/unequip from daggers.json contact/chainFrom. Protocol v19 unchanged.
+Test: tests/melee*.test.ts, tools/melee-browser-test.mjs, assets:verify. No commit/push/deploy.
+
 ## Reward crate and crate skins (2026-11-05)
 
 See docs/CRATE_REVEAL.md. This supersedes the "Grants and functional crates are NOT

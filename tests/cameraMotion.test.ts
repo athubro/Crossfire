@@ -15,10 +15,21 @@ function setup() {
 }
 
 describe('camera stairs and impulses', () => {
-  it('decays a distance-scaled explosion impulse without changing the optical axis or aim', () => {
-    const run=(distance:number,reduced=false)=>{
+  it('sniper recoil kicks upward and recovers without permanent aim drift',()=>{
+    const {rig,player}=setup();const initial={...rig.aimAngles()},yaw=player.yaw,pitch=player.pitch;
+    rig.addRecoil(5.2,.6,false);let peak=0;for(let i=0;i<240;i++){rig.update(1/120,1,90,.268);peak=Math.max(peak,rig.aimAngles().aimPitch);expect(player.yaw).toBe(yaw);expect(player.pitch).toBe(pitch);}
+    expect(peak).toBeGreaterThan(.04);expect(rig.aimAngles().aimPitch).toBeCloseTo(initial.aimPitch,8);expect(rig.aimAngles().aimYaw).toBeCloseTo(initial.aimYaw,8);
+  });
+  it('confirmed melee is optical roll only while mouse look remains live and drift-free',()=>{
+    const {rig,player,camera}=setup();rig.update(0,1,90,1);rig.meleeHit(3);rig.applyLook(10,5,1,false,1);
+    const yaw=player.yaw,pitch=player.pitch,aim=rig.aimAngles();
+    for(let i=0;i<30;i++){rig.update(1/120,1,90,1);expect(player.yaw).toBe(yaw);expect(player.pitch).toBe(pitch);expect(rig.aimAngles()).toEqual(aim);}
+    expect(camera.rotationQuaternion.toEulerAngles().z).toBeCloseTo(0,10);
+  });
+  it('decays a confirmed damage-scaled explosion impulse without changing the optical axis or aim', () => {
+    const run=(damage:number,reduced=false)=>{
       const {rig,camera}=setup();rig.update(1/60,1,90,1);const aim=rig.aimAngles();
-      rig.explosion(distance);let peak=0;
+      rig.explosion(damage);let peak=0;
       for(let i=0;i<120;i++){
         rig.update(1/60,1,90,1,0,reduced);
         peak=Math.max(peak,Math.abs(camera.rotationQuaternion.toEulerAngles().z));
@@ -29,9 +40,9 @@ describe('camera stairs and impulses', () => {
       expect(camera.rotationQuaternion.toEulerAngles().z).toBeCloseTo(0,7);
       return peak;
     };
-    const center=run(0),middle=run(2),edge=run(4);
-    expect(center).toBeGreaterThan(middle*2);expect(middle).toBeGreaterThan(edge*10);
-    expect(center).toBeLessThan(.06);expect(run(0,true)).toBeLessThan(center*.15);expect(run(5)).toBe(0);
+    const center=run(100),middle=run(40),edge=run(5);
+    expect(center).toBeGreaterThan(middle*2);expect(middle).toBeGreaterThan(edge*7);
+    expect(center).toBeLessThan(.06);expect(run(100,true)).toBe(0);expect(run(0)).toBe(0);
   });
   it.each([.18, -.18])('smooths a %s m grounded change and settles at the real eye height', (step) => {
     const { player, camera, rig } = setup();

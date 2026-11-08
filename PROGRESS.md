@@ -1,3 +1,963 @@
+# Farmstead: a new outdoor map with a storm shelter (2026-11-07)
+
+New playable map `farmstead` built from `references_images/Newoutdoormap.png`; see docs/FARMSTEAD.md.
+Gameplay, scoring, networking (WebSocket v21, HTTP schemas), cosmetics and Cloudflare configuration are
+unchanged. Layout, collision and map revision are new (`MAP_IDS` has a fourth map and the schedule reshuffles once
+per full pass; with three maps that was identical), so the frontend assets and the Worker need a matching release when
+authorized. No commit, push or deployment.
+
+## Added
+- **Surface** (74 x 92 m play area, 66 x 83.5 m fence line): farmhouse (26 x 16.5 m: living room, hall, kitchen,
+  dining room, pantry, stairs, three bedrooms upstairs, a balcony over the dining porch with a drop-down gap), barn
+  (double-height bay, two stalls, hayloft and stair, forebay deck), two-floor log cabin with a balcony on the west, south
+  and east and a gap in the south railing, garage with a wide bay and a workshop, four shacks open on all four sides,
+  post-and-rail fence with open gaps on every side, dirt paths from the south gate to the house, garage, barn and
+  cabin, 39 trees, 45 crates (extra ones under the three balconies), 20 hedgerows, 9 exterior posters. No doors: every
+  gap of the plan is an open entry; windows are real openings.
+- **Storm shelter**: 922 m2 of rooms and tunnels at -3.5 m (3.2 m clear), eight rooms joined by ten offset tunnels in a
+  loop, five entrances (house hall and barn stall stairs, three fieldstone portals), 16 piers, 59 props, concrete and
+  timber styling (`underground.py` style `farm`).
+- **Pipeline**: `tools/farm_structures.py` (buildings as elements) -> `blender/scripts/lib/farmstead.py` (mesh and
+  collision from the same elements, roofs visual only with a solid ceiling slab under each), `tools/layout_farm.py`
+  (layout, prop validation), `terrain_farm.py` (meadow, ragged dirt paths, exact interior floors), `props_farm.py` (20 new
+  props), new materials and Poly Haven textures (grass, dirt, siding, logs, bark) plus procedural leaves and hay,
+  `tools/farm-shots.mjs`, `farm-thumb.mjs/.py`, `farm-menu-shot.mjs`, `tests/farmstead.test.ts`.
+- **Shared fixes**: `collision_gen` reads the play area per axis (non-square maps), the map schedule shuffle uses the
+  map count, the tactical map draws `farm.solids`/`farm.fences`, the map-menu grid auto-fits four cards, `map.test.ts`
+  probes each zone's own surface (a 1.2 m fence is not ground), `collisionSafety` probes with 1 mm, street-only suites
+  (`compactMaps`, `mapRealism`, `phase2Maps`, `stairSliding`) skip the farmstead, `mapOverhaul` allows 76.5 m lanes
+  on the open map, the geometry z-fight suite covers it.
+
+## Verified
+- 823 frontend tests (1 existing skip): 820 passed in the full run and the 2 `characterWeapon` timeouts that load caused
+  passed alone; the Worker suite passes (integration 22/22, including both real clients rotating through all four maps
+  with a farmstead spawn); typecheck, production build and `assets:verify` pass. `tests/farmstead.test.ts` walks every opening both ways with no gun, a rifle
+  and a sniper rifle, every stair, the cabin balcony (railing blocks, the gap drops), the fence gaps, the shacks, all five
+  shelter entrances, and Practice navigation from every spawn to every room; the shared `MAP_IDS` suites (integrity audit,
+  collision safety, tactical, practice bots, overhaul walks, posters, geometry/z-fight, assets) pass for it.
+- Practice bots over six seeds: no stuck bot, they climb to the 3.4 m and 3.0 m floors and descend to the shelter.
+- Real Chrome screenshots (`node tools/farm-shots.mjs`, git-ignored `test-results/farm/`): six aerials, the yard and
+  paths, the fence gaps, every building from outside, house/barn/cabin/garage inside (ground and upper floors, loft,
+  forebay, balconies), all four shacks, all eight shelter rooms and five entrances (about 80 viewpoints). Fixes found
+  that way: a green strip down the middle of wide paths, orange dirt, a brown skirt past the meadow, grey and dark
+  interiors, rusty-looking posts, a window shutter against a door frame, benches and sofas in doorways, stairs that
+  met a window or a door, a stair void that caught a gun barrel, and a bot pocket between a bush, a hay bale and a hedge.
+
+## Remaining limits
+- Interiors stay dim (two point lights on every map); the shelter is deliberately darker than the yard.
+- The thumbnail is a game screenshot; there is no Blender preview render for this map.
+- The aerial shots are hazy at 40+ m (the map's distance fog).
+- Public Cloudflare behaviour was not validated; old browser tabs need a refresh after the matching releases.
+
+# Melee polish, blade trails, bigger underground spaces and posters (2026-11-07)
+
+Presentation, map-art and navigation pass; see docs/UNDERGROUND_POSTERS.md and the new "Expressive
+arcs, blade trails and a heavier finisher" section of docs/DUAL_DAGGERS.md. `shared/melee.ts`
+(damage, range, arc, contact windows, chain gates), scoring, networking (WebSocket v21, HTTP
+schemas), cosmetics and Cloudflare configuration are unchanged. Layouts, collision and map
+revisions of Town and City changed (Industrial's layout is byte-identical, its buildings gained
+posters), so the frontend assets and the Worker need a matching release when authorized. No
+commit, push or deployment.
+
+## Changed
+- **Melee arcs** (`blender/melee/dagger_design.py`, regenerated `dagger_clips.glb`/`daggers.json`):
+  attack 1 now sweeps the first-person view from upper right to lower left, tip NDC x
+  0.77 -> -0.76 (it was 0.68 -> -0.19), attack 2 mirrors it; the torso turns into the cut and
+  the support hand ducks clear. Timing is still 250/250/400 ms with the same contact windows.
+- **Finisher**: slow 95 ms wind-up pulling both hands to the chest (right above left, elbows
+  folded), 110 ms hold with 1-2 cm secondary drift and a moving torso, then a 40 ms release to
+  +/-0.31 m (grips at +/-0.94 NDC) and a recovery to the guard by 400 ms. Contact 215-305 ms and
+  chain 310 ms unchanged.
+- **Blade trails** (`src/game/melee/MeleeTrail.ts`, `MeleeView.run/sampleTrail/finishTrail`,
+  `RemotePlayers.trail`): camera-facing strip along the dagger tip's animated path, Catmull-Rom
+  smoothed, additive with vertex-alpha fade; slash = cool thin core + halo (150/220 ms),
+  finisher = both hands, warmer, wider, 200/320 ms layers. First person samples 4 ms slices of
+  an attacking frame and corrects the newest sample onto the real blade after the arm IK;
+  third person is a simplified per-frame world-space strip (<= 45 m, visible players only);
+  Chromebook mode: one layer, 8 ms slices. Cosmetic only.
+- **Civic Central metro** (`underground.py`, `tools/underground_layouts.py`): floor -3.8 m, 3.5 m
+  clear (was -2.6 / 2.3), 62 -> 375 m2: 34 x 8 m hall, two stair lobbies, gate line with four
+  gate blocks, ticket machine bank, 14 piers (0.8 m; the original two kept at (2.2, 0) and
+  (6.4, 0)), two pillar-row platform zones, four rooms behind door tunnels; 29 floor props
+  (9 benches, 7 vending machines, 7 bins, wet-floor signs, planter, cabinets, bags), 66 wall
+  items (banners, platform/exit/ticket/restroom/staff signs, two route maps, 38 posters,
+  3 utility doors), ceiling LED grid and beams.
+- **Cistern and wine cellar**: floor -3.5 m, 3.2 m clear, 62 -> 181 m2: cistern hall with six
+  piers around a raised stone tank, wine vault (4 racks, 2 casks, barrels), two stores, brick
+  and flagstone, enamel signs, 11 vintage posters; it shares nothing with the metro's look.
+- **Posters** (all maps): 12 invented designs in `urban/posters_fun.jpg` (one atlas material).
+  Facade pass `BuildingGenerator.poster_pass` + `interior_posters`: Town 13 (2 inside), Industrial
+  17 (6 inside, framed boards), City 6 on facades plus the 38 in the metro; placement registry in
+  `docs/map-posters/<map>.json`.
+- **Generator**: per-style `floor_y`/`risers`/`run`, `prepare()`, piers with size, `blocks`,
+  `decor` validated against real walls, `walks`; new props `vending_machine(_blue)`,
+  `wet_floor_sign`, `wine_rack`, `cask`; materials `posters_fun`, `underground_signs`.
+- **Tests/tools**: `tests/meleeTrail.test.ts`, `tests/posters.test.ts`, new cases in
+  `tests/meleeAnimation.test.ts` and `tests/mapOverhaul.test.ts` (aisle/room walks with rifle and
+  sniper both ways, pillar spans, area/height, Practice navigation); `tools/check_underground.py`,
+  `tools/melee-trail-test.mjs`, `tools/underground-shots.mjs`, `tools/poster-shots.mjs`,
+  `tools/make_underground_art.py`. Small fixes: `tactical.ts` ignores underground props; the
+  street-bench and stair-flight tests skip underground props; `collisionSafety` tolerates float
+  depth (-3.8000000000000003).
+
+## Verified
+- 762 frontend tests pass (1 existing skip); server 85/85 (rebuilt Worker bundle); typecheck,
+  production build, `assets:verify` (216 materials, 3 maps), `python -B -I tools/check_underground.py`.
+- Real Chrome: `node tools/melee-trail-test.mjs` 16 checks (trail at 120 and 30 FPS steps,
+  sample within 2 cm of the blade, fade-out, Chromebook one layer, bot trail),
+  `node tools/melee-anim-test.mjs` and `node tools/melee-browser-test.mjs` (wrists <= 23.5 deg).
+- Visual inspection done by looking at the screenshots (git-ignored `test-results/`): three
+  attacks' key frames and the stepped trail sheets, finisher crossed hold and release (first and
+  third person), the bot's trail close-up, metro (hall both ways, ticket hall, gate line, east and
+  west zones, pillars, vending/bench/bins, route map, poster wall, ceiling lights, the four rooms,
+  both stairs from below and from the street), cellar (stair bottoms, hall, tank, vault, stores,
+  stairs, portals) and 9-10 posters per map including interiors. Corrections found that way:
+  jagged trail (sampling offset), too-wide trails, metro too dark, plain ticket machines,
+  posters crossing a material seam or trim band, a lamp in front of a sign, over-bright
+  bottle ends, posters hiding behind a header course.
+- Map review draw calls (median / max): Town 128 / 192, City 117 / 177, Industrial 113 / 153
+  (the project's earlier figure was about 130 median).
+
+## Remaining limits
+- The metro's clear height is 3.5 m, not more: the civic stair cannot start north of z = -12.2
+  (a long gun needs 1.6 m before the plaza's building edge), which caps the stair length and so
+  the depth. The cellar portals keep their old 5.4 m length for the same reason (a longer
+  portal made a server test's sightline collinear).
+- Practice City lost one target and the Town and City spawns were recomputed (16 each) by the
+  larger stair footprints.
+- Modern facades have little blank wall: City has only 6 facade posters (framed boards use a
+  band under the first floor when trims allow); Industrial interior posters can sit behind
+  racks. No poster is collidable by design.
+- Third-person trails are one strip per frame (smoothed), so a very distant or very fast swing
+  looks simpler; first person is the detailed version. Tested on one machine (headless Chrome,
+  Intel iGPU); no multiplayer session with real peers, low-end device or Chromebook hardware was
+  tested.
+- Wall art, ceiling beams and machine screens are visual only above/against walls (no collision
+  by design); the cistern tank's water is a flat surface.
+- Public Cloudflare behaviour was not validated; old browser tabs need a refresh after the
+  matching releases.
+
+# Player proportions, independent weapon FOV and nametag bars (2026-11-07)
+
+Completed the three presentation refinements. No gameplay, shared protocol,
+Worker, hitbox, movement collision, hosting configuration or original GLB asset
+changes. No commit, push or deployment performed.
+
+- Nametag bars are now 4.5 px tall (50% above the previous 3 px), rounded with
+  the existing translucent backing, and inherit the label color: teammate blue,
+  opponent red, including FFA. Existing health/max-health interpolation remains
+  frame-rate independent. Existing friendly-through-geometry / opponent LOS and
+  smoke visibility rules are preserved; no raycasts were added.
+- The existing depth-isolated first-person rendering group now has its own fixed
+  90-degree horizontal projection and 0.012 m near plane. It shares the world
+  camera's eye/view transform and restores the world projection after rendering.
+  World FOV, ADS magnification and authoritative aim are unchanged. Guns,
+  daggers, muzzle flashes and camera-space effects use the same projection;
+  weapon offsets, reloads, recoil and animation transforms were not retuned.
+- CharacterProportions broadens the shared bind mesh once at asset load: torso
+  and shoulder shell approximately 12%, upper-arm thickness 16%, and legs 14%
+  around their original bone centre lines, blended with the exported weights.
+  It also adjusts the matching first-person dagger arm mesh. Height, head/hand
+  positions, bones, grip targets, animation tracks and texture UVs are preserved.
+  Geometry remains shared across the home preview, remote players and Practice
+  bots; there is no added per-frame mesh deformation or simulation work.
+
+## Files
+
+- `src/styles.css`: bar height and inherited relationship color.
+- `src/weapons/WeaponView.ts`: independent viewmodel projection in existing group.
+- `src/game/CharacterProportions.ts`: shared cosmetic bind-mesh adjustment.
+- `src/game/CharacterAsset.ts`, `src/game/melee/MeleeAssets.ts`: apply once on load.
+- `tests/weaponProjection.test.ts`: all four real weapons at minimum/default/
+  maximum and scope FOV; fixed projection, unchanged transform, world restoration.
+- `tests/characterProportions.test.ts`: real GLB body/limb broadening, unchanged
+  height/head/hands/bind matrices/clips/UVs/indices, idempotence and shared geometry.
+- `tools/player-presentation-browser-test.mjs`: repeatable production-browser QA.
+
+## Verification and limits
+
+- `npm.cmd run typecheck`: passed.
+- `npm.cmd test -- --maxWorkers=2`: **736 passed, 1 intentionally skipped**
+  (the pre-existing opt-in character performance benchmark). Existing real-rig
+  weapon grip, melee, limp-body, lean, movement and protocol tests passed.
+- `npm.cmd run build`: passed; existing large-bundle warning remains.
+- `node tools/player-presentation-browser-test.mjs`: **17 checks passed** against
+  the production build served under `/crossfire/`, using real local Practice.
+  Real teammate/opponent DOM bars match label colors and measured 4.5 px height.
+  All four guns at 70/90/110 FOV, ADS, reload/muzzle-flash poses, a real sniper
+  scope and dagger FOV/grip checks completed without browser errors/missing assets.
+- Visually inspected `test-results/player-presentation/contact-sheet.png` and
+  individual rifle/ADS renders: broader armed/three melee poses, consistent weapon
+  size, centered sights, working scope, intact dagger hands. Report and PNGs are
+  ignored QA outputs. Initial browser-harness assumptions about locked weapon
+  switching and the scope's settling transition were corrected to use real spawn
+  selection and condition-based zoom readiness; no gameplay changes were needed.
+- No new public Cloudflare or live multiplayer validation was performed. Visibility
+  logic was reviewed and left unchanged; the browser checks used actual Practice
+  team identities. These changes require only a frontend release when authorized;
+  no Worker/protocol migration is required. Exhaustive pose/device/GPU coverage
+  and a new performance benchmark were not performed.
+
+# Weapon balancing, sniper zoom and shotgun improvements (2026-11-07)
+
+Completed on the existing shared Weapon state machine and hitscan pipeline.
+Models, cosmetics, difficulty progression, melee gameplay and hosting settings
+are preserved, including prior uncommitted work. No commit, push or deployment.
+See `docs/WEAPON_BALANCE.md` for implementation details, commands and release notes.
+
+## Exact final configuration
+
+| Weapon | Magazine | RPM / trigger interval | Close body damage | Additional changes |
+|---|---:|---:|---|---|
+| AR | 30 | 630 / 95.238 ms | Server/local-authority integer roll 20, 21 or 22 per hit | Exactly 10% lower RPM; original recoil/range/falloff retained |
+| SMG | 64 | 1122.7 / 53.443 ms | 11 | Exactly 9% higher RPM; original range, recoil and reload timing |
+| Sniper | 4 | 50 / 1200 ms | 75 | 5.2 degree camera kick tuning input, view kick 26; 224 ms ADS; no permanent aim contribution |
+| Shotgun | 2 | 240 / 250 ms | 14 per pellet, 14 pellets | 220 ms between-shot pump; 7 degree hip / 3.85 degree ADS pellet cone; 12-44 m falloff to 18%; 80 m maximum range |
+
+- Existing 1.5x headshot multiplier and damage falloff apply after the AR's base
+  roll. The Worker controls randomness; Practice uses its seeded RNG. The roll
+  feeds confirmed damage, health, death and scoring together. SMG explicitly
+  clears the new inherited AR roll option. AR's displayed base is the average 21.
+- Fractional fixed-tick cooldown carry avoids rounding the new RPMs downward.
+  Snapshot cooldown remains nonnegative/replayable; no catch-up burst is added.
+- Shotgun aimed cone is 55% of hip (about 57% combined with its center aim cone).
+  Only actual simulated gun ADS controls this cone in Worker and Practice. No
+  client-supplied ADS state, damage, spread or hit claim is accepted. Hip cone and
+  pellet damage remain unchanged; doubled falloff plus ADS makes medium range
+  more useful without making long range reliable.
+- Shotgun ADS FOV scale is 0.82 (previously 0.88), and its existing sight anchor
+  moves 4 cm closer. Pump cue fractions follow the faster cycle. Shell reload
+  450/500/400 ms start/per-shell/end and the 600 ms empty-reload chamber stroke
+  remain unchanged through a separate shared emptyReloadCycleTime setting.
+- Sniper ADS duration is 20% shorter than 280 ms. Default FOV scale is .22/.82,
+  yielding about 3.73x FOV-ratio magnification (18% below the old default).
+  SNIPER_ZOOM configures a smooth approximately 2.95-4.55x range, 0.25x wheel
+  steps and interpolation. A small scope HUD indicator shows current zoom.
+- Scoped wheel input is consumed before weapon cycling; other bindings and menu
+  scrolling remain intact. Zoom changes neither aim angles nor damage/accuracy.
+  Stronger camera recoil uses existing recovering springs without permanent yaw
+  or pitch changes; the real sniper model also receives a stronger impulse.
+- HUD, ammo/reloads and all four bot tiers reuse the shared configurations.
+  Practice still has no persistent statistics/reward adapter.
+
+## Protocol and release
+
+Protocol is now **v21**: v20's decoder hardcoded a 32-round maximum and would
+reject valid 64-round SMG snapshots. Validation now derives its upper bound from
+shared weapon configuration. No new wire fields or client combat claims were
+added. Actual frontend/Worker integration covers the 64-round SMG. The existing
+backend-first release workflow/health gate remains unchanged.
+
+Both frontend/assets and Worker require an authorized matching release. No
+Durable Object migration, URL, env file, credentials or Pages base-path changes.
+No public Cloudflare deployment or public-server validation was performed.
+
+## Verification
+
+- Final full frontend run (`npm test -- --maxWorkers=2`): **735 passed, 1 existing
+  skip**, 75 passing files. Worker count was bounded after concurrent runs caused
+  timing-only timeouts in unchanged rig/collision tests; no assertions/timeouts
+  were disabled or increased.
+- Focused weapon/balance/damage/replay/camera suite: **49/49 passed**. Includes
+  exact RPM ratios and long-run cadence, 64/4-round capacities and reloads, two
+  rapid shotgun shots, all AR rolls and head/falloff multipliers, seeded medium-
+  range shotgun comparisons, smooth bounded zoom, wheel routing and no aim drift.
+- Final real workerd/WebSocket run: **44/44 passed**, covering weapon-balance,
+  combat, assists, melee, actual frontend protocol and match-reward integration.
+  Includes FFA/Teams, server ADS cones, cooldown denial, new capacities/reloads,
+  all four guns, authoritative health/score, forged ADS/spread rejection, headshots,
+  leaning/walls, regeneration, session resume, assists and durable gem grants.
+- Test expectations now use legal confirmed AR rolls and corresponding health.
+  Assist fixtures use two actual AR bullets when the old 25+75 body-hit setup no
+  longer eliminates. The second waits for acknowledged cooldown state. The melee
+  resume assertion accepts legal continuation or expiry across the existing
+  350 ms gate rather than predicting it from a stale snapshot. Gameplay timing
+  and combo rules were not changed.
+- Final production `/crossfire/` Chrome Practice suite: **15/15 passed**, zero
+  browser exceptions/missing assets. Real wheel zoom, defaults/limits/HUD, no
+  weapon-switch conflict, visible sniper recoil with no aim drift, smooth exit,
+  shotgun follow-up shots, SMG HUD/reload to 64 and local non-persistent policy.
+  Inspected sniper maximum-zoom and shotgun ADS screenshots.
+- Deployment release tests: **7/7 passed**. Frontend/backend typechecks,
+  production frontend build, Worker dry build and git diff --check pass.
+  The existing large-bundle build warning remains.
+- Reports/logs/screenshots: ignored `test-results/balance-*` and
+  `test-results/weapon-balance-browser`.
+
+## Limits
+
+Browser checks used local Windows Chrome, not public multiplayer, physical
+Chromebooks or other browsers. Medium-range balance has seeded collision/hitscan
+coverage but still benefits from human playtesting. Adjustable zoom is cosmetic
+and not sent to spectators; their view uses the weapon's new default zoom.
+Nothing was committed, pushed or deployed.
+
+# Confirmed melee impact, audio and knockback (2026-11-07)
+
+Completed the focused feedback update on Claude's current fast dagger clips and
+LimpBody baseline. Preserved the existing dirty animation/model work. Damage 35,
+combo/scoring rules, hit validation, authored contact/chain timing, equipment and
+wire protocol v20 are unchanged. No commit, push or deployment.
+See `docs/MELEE_IMPACT.md` for files, tuning, commands and release details.
+
+## Completed
+
+- Added shared authoritative meleeKnockback after positive confirmed damage in
+  both Worker and local Practice. Stages 1/2 add matching 1.4 m/s horizontal
+  impulses; stage 3 adds 3.1 m/s. Direction is normalized from the server trace,
+  total speed is bounded, and a small grounded lift preserves the brief reaction.
+  Sliding uses its existing cancellation/cooldown. Existing controller substeps,
+  wall/floor collision, snapshots and reconciliation handle actual displacement.
+  No client-provided impulse or teleport path exists.
+- Added configurable finite optical camera roll: left/right 100 ms responses and
+  a stronger two-direction 180 ms third response. Smooth recovery reaches exactly
+  zero; new hits replace rather than stack. Mouse look, player yaw/pitch, intended
+  aim and shot direction are untouched. Reduced motion suppresses it; resets clear it.
+- Generated original paired fast swooshes, a deeper layered finisher swoosh and
+  a separate crisp non-graphic impact WAV. Existing master/SFX settings, limiter,
+  spatial distance attenuation and voice budgets remain active. Local swings use
+  current metadata timing and stop at clip end; remote contacts use spatial audio.
+- Added bounded per-session confirmation deduplication and timing/round/readiness
+  guards. Only positive confirmed contacts produce impact sound, hit marker and
+  attacker camera reaction. A miss produces no false impact. Old contacts cannot
+  play after the remaining clip window. Flourishes keep their separate twirl cue
+  and never enter attack/damage feedback.
+- Stage-3 lethal confirmations correlate with victim/life in either elimination
+  event order, without adding protocol fields. DeathMotion gets one early bounded
+  backward boost, then retains its swept three-sphere collision and Claude's
+  captureDeath/poseDeath/LimpBody loose-joint relaxation. Duplicate or late events
+  cannot repeatedly kick a corpse. Practice uses the same presentation.
+
+## Verified
+
+- Full frontend suite: **727 passed, 1 existing skip** (74 passing test files).
+- Focused melee/camera/death/limp-body suite: **33/33 passed**, including unchanged
+  authored timing, real Practice human/bot combat, impulse direction/strength/cap,
+  wall/floor safety, death emphasis, finite camera response at 30/60/144 FPS,
+  live mouse look/no aim drift, reduced motion, duplicate/stale events and WAVs.
+- Final real workerd regression run: **38/38 passed**, across backend melee,
+  combat, grenades and frontend/Worker protocol integration. Confirms FFA/Teams,
+  actual knockback movement, combo kills/points, session resume, team immunity,
+  assists/statistics, all four guns, ammo/reload/fire-rate validation, wall/lean
+  collision, regeneration, grenade/crouch behavior and wire compatibility.
+- Backend melee focused run also passed **5/5**. Its movement regression requests
+  explicit free space behind the actual-map victim: an earlier valid melee fixture
+  had a wall directly behind the victim that correctly prevented displacement.
+  The resume test now acknowledges a neutral input before the next press, avoiding
+  dependence on the old socket's release state. No arbitrary wait or timing change.
+- Production `/crossfire/` Chrome + real local Worker/second WebSocket client:
+  **20/20 browser checks passed**, zero browser errors/missing assets. Verified
+  physical V equip, remote animation/damage, stages 1/2/3, exactly three dedicated
+  impact cues for three hits, actual spatial playback with inverse attenuation,
+  a confirmed miss with no impact cue, unchanged firearm ammunition, weapon return
+  and killer spectating. Inspected the elimination screenshot. Existing Locker,
+  crate ownership and retry-safe purchases still pass in that same scenario.
+- Frontend and backend typechecks pass; frontend production build and Worker dry
+  build pass. Existing frontend large-bundle warning remains. git diff --check passes.
+  Reports/logs/screenshots are under ignored `test-results/melee-impact-*` and
+  `test-results/melee-gameplay-browser`.
+
+## Remaining limitations and release
+
+- Public Cloudflare/Internet latency, physical devices and subjective speaker
+  quality were not validated. These are actual local workerd/Chrome results.
+- Existing limp limbs still lack individual floor colliders; collision-safe root
+  approximation is preserved. A reconnecting spectator cannot infer a historical
+  third-stage kill from an old elimination without its melee confirmation.
+- Expired confirmations intentionally do not produce delayed cosmetic feedback.
+- Both frontend/assets and Worker require an authorized release for the complete
+  feature. Protocol remains v20; no Durable Object migration, URL, credentials or
+  deployment workflow changes. Nothing was committed, pushed or deployed.
+
+# Fast dagger attacks, idle flourish and limp death (2026-11-07)
+
+Animation-only pass on the existing melee system and death presentation; see
+`docs/DUAL_DAGGERS.md` (section "Fast attacks, flourish and limp death"). The rig,
+dagger models, CharacterWeapon pose system, damage, range, arc, scoring, cosmetics and
+protocol (v20) are unchanged. No commit, push or deployment.
+
+## Changed
+- **Attacks** (`blender/melee/dagger_design.py`, regenerated clips + `daggers.json`):
+  stage 1 `attack_cross` is the right-hand diagonal (upper right to lower left, 250 ms),
+  stage 2 `attack_forward` its left-hand mirror (250 ms), stage 3 `attack_finisher` the
+  crossover (400 ms: arms fold and cross with the right hand above the left, ~100 ms
+  hold, then both arms snap outward). The strike itself covers 40+ cm in about 30 ms
+  (2-3 frames at 60 FPS); wind-up and recovery stay smooth. Clip ids are unchanged
+  because gameplay and the network use them. Clips are exported at 120 Hz.
+- **Transitions** (`MeleeAnimation.ts`): attacks 1-2 start in their own wind-up and are
+  blended in over 70 ms from wherever the arms are, so a chain flows from the previous
+  follow-through. An interruption in the middle of a crossfade now freezes the pose being
+  shown and blends from it (the old code dropped the half-blended layer).
+- **Idle flourish**: new clips `flourish_r` / `flourish_l` (520 ms finger spin, the other
+  hand holds the guard). The animator starts one at random every 6-12 s, only from a
+  settled guard, never during a blend or combat. An attack, unequip or reset cancels it
+  at once. Cosmetic only; remote players and bots run their own random flourishes.
+- **Death** (`src/game/LimpBody.ts`, `CharacterAsset.captureDeath/poseDeath`): every joint
+  is a damped spring that starts exactly at the last living pose (gun/dagger IK
+  included) and relaxes to a limp pose. The body tipping over lags into the limbs, each
+  limb has its own frequency, delay and asymmetry (seeded by the elimination id), knees
+  are heavily damped (no hyperextension), arms come to rest on the floor whichever way
+  the body falls, hips return to standing height and the body settles 4 cm lower.
+- **Combat metadata (the one gameplay-adjacent change)**: `shared/melee.ts` now mirrors
+  the new timings: duration 250/250/400 ms, contact 70-160 / 70-160 / 215-305 ms (same
+  90 ms width as before), chain 170 / 170 / 310 ms. Damage 35, range, arc, combo reset
+  350 ms, equip and unequip are unchanged. **Side effect:** the combo cycle is about
+  650 ms instead of 1190 ms, so melee damage per second is roughly 1.8x higher. Tune the
+  three `chain` values (via `dagger_design.py` and `shared/melee.ts`) if that is
+  unwanted; `tests/meleeCombat.test.ts` fails if the two disagree. The Worker and the
+  frontend need a matching release.
+
+## Verified
+- 718 frontend tests pass (1 existing skip), server 84/84, typecheck, production build
+  and `assets:verify` (8 clips). New tests: speed and pose targets, flourish scheduling
+  and interruption, no-snap blending, limp relaxation (running, sliding and
+  gun-and-dagger starts, no snap at capture, knees, gravity-aware arms for backward,
+  forward and side falls).
+- `node tools/melee-anim-test.mjs` (new, real Chrome, Practice) passes: first-person key
+  poses, a mashed 60 FPS combo that never returns to idle (worst grip step 0.18 m per
+  frame), a flourish and a flourish interrupted by an attack, frame-rate independence
+  at 30/60/144 FPS steps, a bot flourish, and deaths while standing and running (no
+  clipping, no hovering). `node tools/melee-browser-test.mjs` still passes 12/12.
+- Contact sheets inspected in `test-results/melee-anim/` (git-ignored): attacks 1 and 2
+  start and follow-through, the crossed pose and the release, combo frames, both
+  flourishes, the interruption frames, third-person key poses, and the standing and
+  running death sequences with the resting pose. Wrists stay at most 23 degrees;
+  forearm clearance is at least 6 cm.
+
+## Remaining limits
+- Chain gates are shorter than before (see above); retune if the DPS change is unwanted.
+- The first-person slash ends low and partly below the bottom edge at 90 degree FOV;
+  other FOVs were not checked. At the finisher release the blades point forward and up
+  and are partly hidden behind the fists.
+- Limbs have no individual floor collision: the limp pose follows gravity and the body
+  is placed by the existing three-sphere DeathMotion, so a hand may sink a few cm into
+  uneven ground. Death photos use wall-clock time and were taken at 18-60 FPS headless.
+- The bot flourish was photographed at 2.4 m only (small); the third-person lab sheet is
+  the clear view. Idle flourishes have no spatial sound for remote players.
+- No multiplayer session, low-end device or Chromebook mode was tested.
+
+# UI sound polish, magnetic ranges and Practice bots (2026-11-07)
+
+Completed the attached focused update using the existing UI, AudioManager,
+MagneticSlider, BotBrain and local Practice authority. Preserved pre-existing
+uncommitted work. No commit, push or deployment. See `docs/UI_SOUNDS_BOTS.md`.
+
+## Completed
+
+- One delegated UISounds manager covers existing/dynamic buttons, navigation,
+  options, dialogs and crate overlays. Removed the old per-button click call.
+  Disabled/inert/hidden controls remain quiet. Dropdown mouse/keyboard selection
+  emits one shared activation event. Trusted gestures unlock audio; hover cannot.
+- Cached 45 ms warm hover/tick buffers and a deeper/louder 55 ms click play
+  immediately through existing SFX, compressor and master gains. Hover progresses
+  through five gentle pitch steps, resets after 500 ms and adds tiny variation.
+  A 25 ms tick/hover guard and three-voice budget bound rapid input. Existing
+  assets and gameplay/spatial sound paths remain intact.
+- MagneticSlider accepts min/max/step/current value/callback and labels. Spring
+  coordinates use stop indices, preserving previous hysteresis and easing.
+  Discrete selection alone emits a tick; initial/programmatic reset, unchanged
+  input and spring oscillation are silent. Practice retains 0-5 bots; Create
+  Server now reuses it with shared authoritative 2-10 limits and default six.
+- Added Intermediate between Beginner/Advanced using existing states and tuning:
+  600 ms reaction, +/-2.8 degree error, 82% movement, 5.5 s slide attempts, limited
+  cover, low-health retreat and moderate pursuit/burst pauses. Existing Advanced
+  and Absurd combat tuning stays intact. Difficulty alone persists safely in
+  optional localStorage; no saved selection defaults to Advanced.
+- Bots can use real available grenades through held input and the existing charge,
+  inventory, physics, fuse, damage/team/owner-immunity and presentation pipeline.
+  Chance/cooldown scale by difficulty; starts are spaced 3.5 s across all bots.
+  Visible valid opponents, 6-20 m range and swept ballistic path checks gate
+  attempts. Bots pause movement/fire while charging and cancel invalid targets
+  or blocked paths. No injected/fake explosions or unlimited inventory. Existing
+  legitimate elimination grenade rewards remain. Practice rewards/statistics
+  upload remain disabled, with no network/profile adapter added.
+
+## Verification
+
+- `npm test`: **709 passed, 1 existing skip** (72 passing files, one skipped).
+- Final focused sound/magnetic/Practice suite: **30/30 passed**, including actual
+  AI combat at all four difficulties, all-map collision/navigation, preference
+  fallback, short tone/gain/voice budgets, wall/overhead trajectory rejection,
+  held charge, inventory, confirmed blast damage, owner immunity and cancellation.
+- `npm run typecheck`, production `npm run build` and `git diff --check` passed.
+  Build retains the existing large-bundle warning.
+- Production `/crossfire/` Chrome UI suite: **19/19 passed**. Verified actual
+  AudioBufferSource playback, single click cues, pitch progression/reset, disabled
+  silence, exactly five keyboard ticks, no spring duplicates, lobby default and
+  endpoints, mouse drag, touch, reduced motion, Intermediate refresh persistence
+  and small-screen choices. Inspected lobby and 640x480 Practice screenshots.
+- Existing production offline Practice suite: **21/21 passed**, across all three
+  maps, real GLB bots/movement/fire/reload/grenades/scores, team presentation,
+  five-bot matches and recovery after an actual failed online request.
+- Same suite with actual Chromebook mode enabled: **22/22 passed**, zero backend
+  traffic during Practice and unchanged account data. Five-bot samples on this
+  Windows Chrome host were approximately 43-87 FPS, with measured frame fields
+  approximately 6.3-15.0 ms; these are host observations, not Chromebook guarantees.
+- Reports/screenshots are ignored under `test-results/ui-sounds-bots-browser`,
+  `practice-browser-production` and `practice-browser-production-chromebook`.
+
+## Limitations and release
+
+Subjective sound quality was not certified on different speakers. Physical
+Chromebook performance, Firefox/Safari and public multiplayer were not tested.
+Bot aim uses a conservative low arc, so some plausible bank/lob throws are
+intentionally declined. Backend code, balance, shared wire protocol and Cloudflare
+configuration were not changed; no Worker deployment is required for this task.
+Publish the frontend only when authorized. Local commands are in the linked doc.
+
+# Unified header, menu refinements and magnetic slider (2026-11-07)
+
+Implemented on the existing UI and shared motion system. No gameplay, multiplayer,
+protocol, graphics, inventory ownership or purchase-rule changes. Existing dirty
+work is preserved. No commit, push or deployment. See `docs/MENU_HEADER_SLIDER.md`.
+
+## Completed
+
+- Kept one mounted header across Play, Shop, Locker, home Settings and Leaderboard.
+  The existing real account element now lives inside it; username, gem icon and
+  balance remain at the upper right. No duplicate state or account polling system.
+  Removed Shop's redundant second balance label; crate price display is preserved.
+- Reduced header/logo spacing and moved the five tabs upward without reducing
+  their 15.4 px text. One translucent vertical gradient applies to every page.
+  Narrow windows scroll the horizontal tabs rather than shrink their text; selecting
+  a tab brings it into view. Header identity, dimensions and position remain stable.
+- Removed upward Play glows and ordinary navigation hairline outlines, retaining
+  blue Play selection, background illumination, keyboard focus and the existing
+  approximately 1.08 hover overshoot -> 1.03 settle and click compression.
+- Removed the main Shop/Locker/Leaderboard Back buttons. Contextual Back controls
+  in Settings, item previews and Practice remain. Removed the leaderboard-specific
+  inset dark overlay and kept aligned filters, My Stats and independently scrolling
+  rankings below the persistent header.
+- Locker categories now share navigation overshoot/compression and persistent
+  selection. Filtering, all five starter models, item previews and equipment remain.
+- Added the custom 0–5 bot slider with native keyboard/accessibility semantics,
+  visible numeric labels/count, a translucent track and a spring-driven thumb.
+  Velocity-sensitive attraction and hysteresis allow fast multi-stop drags, gentle
+  resistance and nearest-integer release. Only integer values reach Practice setup.
+  Reduced motion snaps directly; no animation frames run once settled.
+- Pointer capture, cancellation, lost capture, focus/window blur, page hiding and
+  disposal clean up slider interaction/animation. Themed thin rounded scrollbars
+  style actual scrolling panels; scrolling itself remains ordinary, not magnetic.
+- Added room for scaled controls and focus rings without disabling legitimate
+  scrolling. Corrected Practice grid minimum sizing on narrow screens, Settings
+  focus-scroll padding on short screens, and Locker category width when a scrollbar
+  is present. No blanket container overflow suppression.
+
+## Verification
+
+- Complete frontend suite: **702 passed, 1 existing skip**. Focused Settings,
+  Practice and magnetic-model run: **39 passed**; final magnetic-model run: **4/4**.
+- `npm run typecheck`, production `npm run build`, and `git diff --check` pass.
+  The existing large-bundle warning remains; no backend build/deployment is needed
+  for these UI-only changes.
+- Production `/crossfire/` browser suite: **161/161 checks passed**, including all
+  five menus at 1920×1080, 1366×768, 1280×720, 1024×600, 640×480 and 390×700.
+  Verified identical header nodes/geometry/gradient, real account state, selected
+  tabs, content clearance, borders, category animation and representative hover
+  scroll bounds. Wheel scrolling through ten real API ranking rows leaves the
+  header fixed. QA rank records exist only in isolated local Worker fixtures.
+- Real mouse click/rapid drag, keyboard Home/End/arrows, CDP touch drag, reduced
+  motion and blur/capture cleanup pass. No browser exceptions or missing assets.
+- Existing UI motion browser suite: **28/28 passed**, covering live Settings,
+  keyboard focus, dialogs, real server browsing, Practice selection/spawn, HUD and
+  pause navigation. Existing home/Locker visual suite: **34/34 passed**, including
+  all five starter thumbnails/previews, original character, responsive labels and
+  preserved overshoot. Outdated glow/Back/four-starter expectations were updated
+  to the requested design and the existing melee starter, with assertions retained.
+- Existing real-Worker cosmetics browser regression: **34/34 passed**, including the
+  real 37-gem header balance, disabled unaffordable crate, all five item previews,
+  keyboard access to the last equipped slot, wallet/equipment preservation across
+  browser refresh, actual remote model/movement and server-controlled ammunition.
+- Visually inspected all five menus and Practice, including narrow layouts, real
+  loaded weapon thumbnails and the existing home character. Reports/screenshots:
+  `test-results/menu-header-browser/`, `test-results/ui-motion-browser-production/`
+  and `test-results/home-locker-production/`.
+
+## Limitations
+
+- Browser verification used local Chrome and the real local Worker. Physical
+  Chromebook/touch-device performance and Firefox rendering were not certified;
+  Firefox and Chromium scrollbar styling are both supplied.
+- On narrow windows, the full-size five-tab row intentionally scrolls horizontally.
+  Backend/protocol/purchase behavior remains unchanged by this update. The previous
+  melee task's matching protocol v20 deployment requirements still apply to it.
+
+---
+
+# Dual-dagger gameplay and cosmetic integration (2026-11-06)
+
+Implemented locally on top of Claude's existing Blender models, arms, grip anchors,
+six clips and IK/blending system. See `docs/MELEE_GAMEPLAY.md` for rules, code paths,
+local commands and release requirements. The presentation-only handoff below is
+historical. No commit, push or deployment.
+
+## Completed
+
+- Separate rebindable **V** melee equipment; existing customized V bindings migrate
+  without being stolen. Unequipping restores the selected gun and ammunition.
+  ADS, gun firing/reload/selection and grenade charging are gated during melee.
+- Shared elapsed-time Cross / Forward / Finisher state machine: **35 HP per hit**,
+  authored contact/chain windows, one buffered press, no automatic held-fire spam,
+  one contact per swing and a configurable 350 ms combo reset after recovery.
+- Worker-authoritative short-range forward-cone/capsule hits, solid occlusion,
+  friendly-fire protection, damage/regen interruption, elimination, assist, feed,
+  standings, statistics and existing reward paths. Clients cannot declare damage.
+- Predicted local animation, input replay/reconciliation, authoritative equipment,
+  stage/start timestamps and confirmed hit events; remote and spectator animation
+  use the original character pose system. Death/respawn/round resets and session
+  resume preserve the appropriate gun and authoritative life state.
+- Practice shares the exact melee rules, and nearby bots can equip and attack with
+  daggers deterministically. Practice retains its explicit non-rewarding policy.
+- MELEE is the sixth Locker filter and fifth equipped slot. Existing inventories
+  gain the Common **Default Daggers** starter without losing gun equipment.
+  Both actual dagger GLBs appear in full-screen previews and crate reveals.
+- All six existing crate skin collections have matching paired material finishes
+  in first/third person. Existing price, availability and rarity odds stay intact;
+  catalog now has 5 starters and 30 crate items. Ownership remains authoritative.
+- Durable crate receipts share the gem/inventory storage batch; concurrent retries,
+  runtime restarts and ambiguous network/5xx responses reuse the original purchase.
+- Quiet equip/flourish and three distinct swing WAV cues, authored flourish/contact
+  timing, existing spatial audio, non-graphic hit markers and damage feedback.
+
+## Regressions found and fixed during verification
+
+- The room could sleep during a stationary equip transition. Finite melee phases
+  now keep the existing simulation awake; ready/hidden phases may sleep normally.
+- Dead-player snapshots repeatedly reset the spectator's view. Reset now happens
+  at the death transition, and a reset invalidates the cached animation key.
+- Pending input replay now changes gun/melee collision clearance per tick, matching
+  authority, without restarting an unacknowledged equip animation.
+- V presses survive render frames shorter than a physics tick and are consumed
+  once. Blur, menus and rebinding clear pending toggles.
+- A grenade regression test placed four bodies through separate asynchronous RPCs
+  near fuse expiry. Its setup now uses one validated atomic placement transaction;
+  grenade damage, timing and assertions are unchanged.
+- The new assist test fired its setup rifle shot before aiming settled. It now
+  waits for authoritative ADS and checks the confirmed shot before melee scoring;
+  no arbitrary sleep or weapon-accuracy change.
+
+## Verification
+
+- Complete frontend suite: **698 passed, 1 existing skip**. Includes real-GLB
+  rig/animation, melee, transport replay and ambiguous crate-retry regression tests.
+  Focused real-GLB rig/animation, melee and transport run also passed **42/42**.
+- Complete backend suite: **84/84 passed**, including all five new real Worker melee
+  cases, existing firearms, assists, grenades, rooms, traversal and match rewards.
+- Real frontend/production-Worker protocol compatibility: **1/1 passed**.
+- Frontend TypeScript/production build and backend generated types/TypeScript/dry-run
+  build pass. Asset/model/texture/catalog checks pass; `git diff --check` passes.
+- Production `/crossfire/` Chrome + real local Worker verification: **17/17 passed**,
+  including physical V, Settings rebinding, three exact authoritative combo stages,
+  reciprocal real-client hits, remote animation, spectator daggers, gun restoration,
+  paired previews, real grant/equip and duplicate-request receipts. No browser
+  exceptions or missing assets. Screenshots/report: `test-results/melee-gameplay-browser/`.
+- Visually inspected final first-person, spectator, Default pair preview and Rich
+  paired crate reveal screenshots. Authored clip/rig tests check grips, wrist angles,
+  arm clearance, blending and frame-rate independence.
+
+## Release and limitations
+
+- **WebSocket protocol v20 requires matching frontend and Cloudflare Worker
+  deployment.** Cosmetics HTTP remains v1. Existing guarded release workflow,
+  Worker URL, Durable Object configuration, origins, `.env.local` and Pages base
+  path are unchanged. Deploy only when authorized.
+- Tests used local Workers/real WebSockets and Chrome, not the public Cloudflare
+  deployment. Internet latency and physical Chromebook/laptop performance remain
+  unverified. Build still reports the existing large-chunk warning.
+- Contacts use a bounded forward cone/capsule with solid occlusion, not blade-mesh
+  collision. Expired attack windows intentionally do not award delayed damage after
+  a long server stall; local browser checks run separately from CPU-heavy suites.
+
+---
+
+# Dual-dagger models and melee animation (presentation)
+
+Implemented and verified locally 2026-11-06. Details, timings and integration notes for
+the combat work: `docs/DUAL_DAGGERS.md`. No commit, push or deployment. Protocol (v19),
+server, gameplay, damage, input, inventory and crates are unchanged; the combat layer
+(Codex) wires those.
+
+## Completed
+- **Daggers:**
+  - Two original daggers from `blender/melee/generate_daggers.py`. All numbers live in
+    `dagger_design.py`.
+  - Matched pair with individual variation: the right has a 150 mm straight-spine blade and
+    a ring pommel; the left a 140 mm recurved blade, jimping and a spike pommel.
+  - Embedded PBR: two-tone coated/polished blades with a streak roughness map, a gunmetal
+    guard, a knurled graphite grip and teal accents. 3.8k and 3.4k triangles.
+  - Origin at the handle centre, with grip/tip/edge/guard/pommel/spin-pivot anchors.
+  - Editable `blender/source/daggers.blend`, renders in `docs/melee/` and a transparent
+    thumbnail.
+- **First-person arms:** `melee_arms.glb` holds the player character's own arm/glove parts
+  on the unchanged 26-joint rig.
+- **Clips:** six GLB clips on animated empties: equip, idle, cross, forward, finisher and
+  unequip, with hand sockets, finger spin and twirl, reveal scale, elbow poles and torso.
+  - `daggers.json` carries per-clip duration, contact, chainFrom, recovery, anticipation,
+    trail and flourish windows, the combo order, attachment/hold, first-person framing and
+    Blender checkpoints.
+  - Hands are authored hand-first. Knuckles are derived from the runtime two-bone IK,
+    giving wrists of 14–24°.
+- **Runtime:**
+  - `MeleeAnimator` (crossfades, combo chaining with a one-request buffer,
+    frame-rate-independent advance).
+  - `DaggerPair` parents each dagger to its hand bone through the inverse grip.
+  - The third-person dagger layer inside `CharacterWeapon` (still the single pose system):
+    the gun lowers and hides, hands blend to the sockets, and torso, clavicles and fingers
+    follow.
+  - Remote players and Practice bots (lazy per avatar, survives gun swaps, hidden at death).
+  - First-person `MeleeView`: real arms on the camera, shared sway/bob, gun lowered and
+    hidden through `WeaponView.setMelee`.
+  - A home pose-lab `melee` option.
+  - Test hooks `__crossfire.melee`, `meleeInspect`, `meleeRemote`, `meleeRemoteSync` and
+    `meleeRemoteInspect`.
+- **Problems found during visual review and fixed:**
+  - Chain crossfades snapped. Now 0.15 s smootherstep, and transitions stay within 15% of
+    the clips' own acceleration.
+  - The 60 ms thrust was too fast to read. Now 75 ms.
+  - Wrists bent 45–84° with authored knuckles. Now derived from the IK.
+  - The first-person cross happened below the screen and the finisher's spin and wind-up
+    above it. Both are reframed into view.
+  - Forearms passed through each other while crossing and uncrossing. Now staggered, with
+    centrelines at least 6 cm apart.
+  - Frozen test poses showed the previous clip. Fixed by resetting before `play`.
+  - Off-screen avatars kept stale gun/dagger visibility and never bound their daggers.
+    Visibility now syncs every frame and binding is eager.
+
+## Verified
+- Frontend **686 passed, 1 existing skip**, including 12 new melee tests:
+  - Clips GLB against the Blender checkpoints (hands within 3 mm), the grip matrix, equip,
+    combo, no snaps and frame-rate independence.
+  - Real-GLB rig: sockets reached, wrists below 30°, grip anchor equals the fist's handle
+    centre, all four guns lower, hide and return, gun swap with daggers out, forearm
+    clearance.
+- Typecheck and production build pass. `npm run assets:verify` passes, including the new
+  dagger checks: references, anchors, all six clips on every channel, the 26-joint arms.
+- `node tools/melee-browser-test.mjs` passed **12/12** on Vite and **12/12** on the
+  production `/crossfire/` build:
+  - First-person gun lowered and hidden, every clip played in order, wrists at most 23.8°,
+    blades 19–22° off the crosshair in the guard.
+  - The `Weapon` state is untouched.
+  - Practice bots show both daggers with the gun away; the daggers stay in their fists
+    mid-attack (≤1 mm) and the bots return to their guns.
+  - No page errors or missing assets.
+- I inspected these contact sheets:
+  - First person: the stepped equip → cross → forward → finisher → return → unequip
+    sequence, and frozen key poses per clip.
+  - Third person: three angles, the gun lowering and return for all four guns, and grip
+    close-ups.
+  - A Practice bot in the European Town map under its lighting.
+
+## Remaining limitations
+- **Not implemented here** (the combat layer's job): melee input, damage and hit windows,
+  network sync, inventory/crate entries, and blocking gun fire, reload or ADS during melee.
+- **Fingers:** only the index fingers articulate. During the roughly 0.22 s finger spin the
+  handle briefly passes the closed fingers.
+- **Reveal:** the daggers scale in rather than drawing from a sheath.
+- **Third-person gun:** it hides at the low point of its drop rather than being slung.
+- **First-person framing:** tuned and checked only at 90° FOV.
+- **Not verified:** multiplayer, a low-end device, and blade trails, which have a data
+  source but no renderer.
+
+STOP: dagger assets and animations are complete and verified; nothing else was started.
+
+# Home screen and Locker design refinements
+
+Implemented and verified locally 2026-11-06. No commit, push or deployment.
+
+- Removed the large Play button's border and the selected Play tab's outline;
+  each keeps a subtle blue fill and a diffuse upward radial glow. Keyboard focus
+  retains its visible outline.
+- Increased navigation text slightly and added a 360 ms overshooting hover to
+  Play and all five navigation buttons. It peaks near 1.08, settles at 1.03 and
+  reverses smoothly even when interrupted. Press feedback and reduced motion are
+  preserved; no layout dimensions change and no animation loops were added.
+- Lightened and shortened the shared header gradient and faded its lower edge to
+  transparent across the home pages.
+- Made Locker inventory cards compact 132 px squares with contained, centered
+  thumbnails and rarity accents. Existing category filtering, equipment panel,
+  actual cosmetic data and full 3D preview remain. Narrow-screen category labels
+  fit within their buttons.
+- Frontend typecheck and production build passed. Chrome checks passed **34**
+  assertions against the production GitHub Pages subpath, using the real local
+  Worker for inventory: hover peak, interruption and return, focus, reduced
+  motion, navigation, preview, card dimensions and four viewport sizes. The
+  existing menu interaction regression suite passed **28** checks.
+- Visually inspected Home and Locker, including 640x480 and 390x700. No physical
+  Chromebook benchmark or public deployment was performed. Gameplay, networking
+  and weapon logic were not changed by this UI task.
+
+# Complete UI animation and interaction polish
+
+Implemented and verified locally 2026-11-06. See `docs/UI_MOTION.md` for files,
+behavior, commands and limitations. No commit, push or deployment.
+
+## Completed
+- Added one shared motion stylesheet and small visibility/feedback helpers:
+  consistent hover/press/selection timings, subtle persistent selection and focus,
+  two-way menu/popup/dialog fades, small content travel and stable home navigation.
+- Covered menu buttons/cards, Settings tabs/controls, room and Practice setup,
+  Shop/Locker/previews, leaderboard/My Stats, loadout, loading, Pause, results,
+  scoreboard/chat and existing HUD notifications. Essential HP/ammo/state updates
+  remain immediate; optional presentation transitions never delay gameplay actions.
+- Outgoing screens become inert and accessibility-hidden immediately. Rapid
+  navigation has no delayed callbacks. Custom dropdowns clear on leaving, Settings
+  categories scroll on short screens, and the crate overlay traps/restores keyboard
+  focus and cancels stale opening callbacks.
+- Saved Chromebook Mode enables a lighter CSS profile live. Reduced motion removes
+  movement and decorative animations while preserving short fades/state visibility.
+- Added real Chrome interaction coverage and extended the existing crate checks.
+
+## Verification and limits
+- Frontend tests: **674 passed, 1 existing skip**. Production build/typecheck passed.
+- Actual frontend/Worker protocol integration: **1 passed**; no protocol change.
+- Development (**29 checks**) and production `/crossfire/` (**28 checks**) browser
+  runs passed, covering hover/press, actual CSS
+  closing interpolation, keyboard/focus, real public rooms, Settings at 640x480,
+  selected/disabled states, 24 rapid navigations, reduced motion, Chromebook profile,
+  Practice spawning, weapons, scoreboard and Pause. Development also checks results.
+- Real local Worker crate run: **25 checks passed**, including authoritative grant,
+  charge/equip, animation/drag behavior, small-screen layout and keyboard wrap/restore.
+- Major menu screenshots actually inspected. No public-server deployment/validation
+  or physical Chromebook benchmark. Older browsers without discrete CSS transitions
+  use immediate closing; native platform popup internals keep platform behavior.
+- Frontend-only release for these UI changes; existing unrelated work is preserved.
+
+STOP: this UI polish is complete; no later feature started.
+
+# Grenade buffs, explosion effects and voluntary aim assist
+
+Implemented and verified locally 2026-11-06. Details and repeatable commands:
+`docs/GRENADE_AIM_ASSIST.md`. No commit, push or deployment.
+
+## Completed
+- Shared authoritative blast tuning: **200 peak raw HP**, **5.2 m radius**, 0.65 m
+  full-damage plateau, smooth exponent-1.15 falloff, unchanged solid-wall occlusion.
+  At least double the old raw damage at every previously damaging distance. Actual
+  applied hits remain capped at remaining HP; strict protocol validation stays v19.
+- Worker and offline Practice exclude the owner by authoritative ID. Surviving
+  opponents receive outward `8 * damage/100` m/s and upward `3 * damage/100` m/s,
+  with 12 m/s horizontal and normal-jump vertical caps. Existing controller/weapon
+  collision, wall sliding, ceilings, gravity and reconciliation handle the motion.
+  Blast interruption uses the existing slide cooldown, without changing its tuning.
+- Smoke volume/density reduced 25%; rising/dissipation and shared visibility remain.
+  Normal dirt puffs/rocks/sparks tripled to **54/36/30**, with brief gravity-driven
+  motion and pooled limits; Chromebook reduces these to **12/5/4**, without burst
+  lights or extra gameplay physics/network transforms.
+- Confirmed local grenade damage drives finite, damage-scaled camera translation
+  and optical roll, ending exactly at neutral after 0.5 seconds. No permanent aim
+  change, distance-only/self shake or amplitude stacking. Reduced motion disables it.
+- Full grenade charge is **1.1 seconds**. The old >6.5% ring visibility threshold
+  caused the initial delay; active charging now shows immediately, with a thicker
+  high-contrast track and smooth HUD interpolation. Server power remains credited
+  from held simulation/authority time. Release never waits for a throw animation.
+- Added an explicit persisted Gameplay aim-assist setting, **Off by default**.
+  Requires deliberate mouse input, visible opponent body point, clear mesh/smoke
+  LOS, **2.5° cone / 2–35 m range**. Correction is at most 12% of input, 1°/s,
+  0.25° per gesture, and only within an initial 180 ms window. Motion/manual-input
+  thresholds, immediate input override, a target latch and recoil/firing suppression
+  prevent snapping, sticky camera, switching or autonomous tracking. No changes to
+  gun damage, spread, fire rate, recoil, hit claims or backend authority.
+
+## Verified
+- Frontend **674 passed, 1 existing skipped**. Frontend/Worker typechecks and builds
+  pass; real frontend/Worker protocol compatibility **1/1**.
+- Full backend **79/79**, including new real four-peer FFA/Teams blast/impulse tests
+  and existing grenades/crouch, scoring, assists, health, rooms, persistence and maps.
+- Unit coverage includes old/new damage curves, falloff/occlusion, camera recovery,
+  reduced motion, timing, particle caps, movement collision/replay at 30/60/144 FPS,
+  aim cone/LOS/input/motion/target/recoil gates, persistence and frame-rate response.
+- Actual Chrome/local Worker: **19/19 Vite**, **19/19 production `/crossfire/`
+  Chromebook**, **20/20 production reduced motion**. Tested real charging/release,
+  debris/rock counts, smoke cleanup, no self feedback, confirmed shake/knockback and
+  manual aiming/stop/wall occlusion. No page exceptions or missing assets; inspected
+  explosion/smoke/damage screenshots. Full charge measured about 1.1–1.2 seconds;
+  local release-to-server throw was below 200 ms including batching/network time.
+- Offline Practice browser checks **25/25**, including bot combat, all three maps,
+  inventory/reload/grenades/results/restart, no account changes and no backend use.
+- The stronger blast legitimately killed an unrelated peer in the old posthumous
+  scoring fixture. Moved that staging peer outside the blast, preserving all exact
+  scoring assertions. The open-space impulse fixture faces toward the blast so
+  existing weapon clearance does not mask the impulse against nearby geometry.
+
+## Limits / release
+- Local validation only; no public deployment tested. Matching frontend and Worker
+  releases are required through existing CI when authorized. No credentials/config
+  changes. Headless Chrome checks are not a physical Chromebook benchmark.
+- Aim assist is deliberately small and needs normal playtesting for final feel.
+  It does not implement continuous tracking or change authoritative shot results.
+
+# HUD polish, leaderboard, idle/death animation and match-placement gems
+
+Implemented locally 2026-11-06. See `docs/HUD_MATCH_REWARDS.md` for rules,
+persistence, verification commands and limitations. No commit, push or deployment.
+
+## Completed
+- Nametag health bars use authoritative HP / 100 with smooth, left-anchored blue
+  fill. They share the label's existing LOS/smoke/teammate visibility; no extra rays.
+- Live FFA scoreboard and FFA results use neutral gray names/local accents. Teams
+  retain the existing relationship colors and authoritative team assignments.
+- Client-only deaths receive bounded impact motion, gravity, swept three-sphere
+  map collision, wall-aware landing direction, damped rig limb reactions and a
+  delayed smooth fade. The original three-second respawn is unchanged. Inspection
+  caught a cold-shader black silhouette: fading materials now compile before swap.
+- Home tabs retain one active selection independently of hover. Global rankings
+  fit below the retained dark header, scroll internally and offer only Kills/Wins;
+  backend points remain. The two filter rows align at desktop and small sizes;
+  My Stats remains reachable and its dropdown scrolls within the remaining height.
+- Menus/buttons are slightly more transparent while preserving text, selection,
+  blur and meaningful action colors. Home idle adds slow breathing/bob/body sway
+  and independent held-weapon/arm movement without losing grip IK/cosmetics.
+- SMG investigation: the current committed preview readiness/warm-up fix already
+  renders it correctly. Verified all four actual GLB thumbnails with cold-cache
+  pixel checks in Vite and the GitHub Pages `/crossfire/` production build; no asset
+  path, model, balance or placeholder substitution was necessary.
+- Match gems: first/second/third = **10/6/3**, plus
+  **min(20, floor(finalScore / 500))**, plus **2** for eligible winning-team players.
+  FFA pays the actual top three overall; Teams pays the top three per team. Ties
+  use the existing deterministic points order; draws have no winning bonus.
+- Server eligibility requires a full 600-second competitive round, two persistent
+  profiles, a real elimination, both teams for Teams, 60 seconds of participation
+  and an actual kill/death/assist. Explicit Leave/AFK forfeit placement; transport
+  interruptions preserve it. Empty/solo/canceled/incomplete/Practice rounds do not
+  earn placement gems. Existing independent challenge rules are preserved.
+- Source-qualified match IDs and private durable per-room high-water receipts
+  prevent duplicate/older payouts. Canonical wallet/statistics/receipt writes are
+  atomic; custom rooms reuse the durable ordered outbox and canonical ACK. Profiles
+  remain payable after session expiry/restart. Spending does not reduce lifetime
+  gems. Results display only confirmed receipts, including late confirmations;
+  offline Practice explicitly says **PRACTICE — NO GEMS EARNED**.
+
+## Verification
+- Frontend: **651 passed, 1 pre-existing skipped**; typecheck/production build pass.
+- Worker typecheck and production dry-run build pass. Actual frontend/Worker
+  protocol compatibility: **1/1**. Protocol remains **v19** with optional result
+  metadata; malformed rewards are rejected and old results remain accepted.
+- Full backend integration: **77/77 passed**, including combat, grenade scoring,
+  assists, challenges, persistent statistics, crates, rooms, reconnects and maps.
+- Chrome against actual local Worker: **27/27** in production and **27/27** in Vite,
+  plus **17/17** final production menu/dropdown checks. Verified real 75 HP → 75%
+  bars, opponent wall occlusion, through-wall teammate bars, FFA/Teams colors,
+  death displacement and canonically confirmed result payouts. No page exceptions
+  or missing assets. Screenshots inspected under `test-results/hud-browser/`.
+- Fully offline Practice browser regression: **25/25**, including bots, all maps,
+  firing/reloading/grenades, results/restarts, unchanged account data, and recovery
+  after a real failed online attempt. No backend requests/sockets during Practice.
+- Reward regressions cover formula/caps, top-three rules, draws/ties, short/solo
+  matches, intentional abandonment, actual pre-result transport drops, canonical
+  lost-ACK retry, persistence/reconnect/restart, source isolation and lifetime gems.
+  A randomized existing daily MVP/win payout caused the first solo fixture failure;
+  the test now chooses the existing combat-only challenge fixture before admission
+  to isolate placement rewards without changing challenge behavior.
+
+## Limits and release
+- Deaths are a lightweight proxy/rig approximation, not per-limb rigid-body physics;
+  fine limb/weapon contacts in every corner are not guaranteed. Collision tests
+  cover floor/walls at 30/60/144 FPS; rendered local deaths were inspected.
+- Competitive eligibility discourages empty-match farming, not coordinated
+  collusion. Independent existing challenge rewards are outside placement totals.
+- Validation is local only. Both Worker and frontend need the matching authorized
+  release through existing CI; no public Cloudflare/Pages deployment was tested.
+
 # Crate and cosmetics polish pass
 
 Polished and verified locally 2026-11-06, on top of the committed crate work ("Gun
@@ -158,8 +1118,9 @@ The user chose a real server crate over a visual-only demo. This supersedes the 
 
 # Assist integration spawn synchronization fix
 
-Fixed locally 2026-11-05. Changes are confined to
-`server/tests/assists.mjs` and this log. No production gameplay, room routing,
+Fixed locally 2026-11-05; final verification completed 2026-11-06. Changes are confined to
+`server/tests/assists.mjs`, the matching synchronization check in
+`server/tests/combat.mjs`, and this log. No production gameplay, room routing,
 protocol, assist eligibility/scoring, respawn delay or migration changes.
 No commit, push or deployment performed; no service redeployment is needed.
 
@@ -192,10 +1153,14 @@ sent, release the genuine snapshot and verify exactly one successful respawn.
 All existing expired-assist, fresh 50-point assist, previous-life cleanup and
 retired-session migration assertions remain.
 
-Validation: `node --test server/tests/assists.mjs` passed after the fix; JavaScript
-syntax and diff whitespace checks passed. Full backend suite and actual
-frontend/Worker protocol compatibility verification are running; final results
-will be recorded before handoff.
+Validation: `node --test server/tests/assists.mjs` passed after the fix and again
+within the complete suite. The first full run exposed the same cross-peer cache
+assumption in the Teams lethal-sniper test: it checked the shooter's kill/score
+after waiting only for the victim's death. It now also waits for the shooter's
+authoritative snapshot (1 kill, 150 points and the expected team total), without
+changing expected values. Final full backend suite: **71/71 passed**. Actual
+frontend/Worker protocol compatibility: **1/1 passed**. Worker dry-run build,
+JavaScript syntax and diff whitespace checks passed. No timeout was increased.
 
 # Fully local Practice with AI bots
 

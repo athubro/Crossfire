@@ -48,6 +48,7 @@ from meshkit import Transform  # noqa: E402
 from terrain import TerrainBuilder  # noqa: E402
 from terrain_industrial import IndustrialTerrain  # noqa: E402
 from terrain_modern import ModernTerrain  # noqa: E402
+from terrain_farm import FarmTerrain  # noqa: E402
 
 ROOT = HERE.parent.parent
 PUBLIC = ROOT / "public"
@@ -85,10 +86,19 @@ MAP_STAGES = {
                  "back_alley": ((-32, 1.7, -14), (-16, 3.2, -14), 18),
                  "ne_road": ((1.5, 1.85, -16), (17, 3.0, -16.5), 18),
                  "courtyard": ((-20.5, 1.7, -5.5), (-14.5, 2.6, 3.5), 16)}},
+    "farm": {"id": "farmstead", "title": "Farmstead", "style": "farm", "sky": "sky_1k.hdr",
+             "terrain_desc": "Meadow and dirt paths, the farmhouse, barn, cabin, garage and open shacks, the perimeter fence and the storm shelter",
+             "sun": (200, 48), "views": {
+                 "aerial": ((-60, 46, 70), (0, 0, 0), 30),
+                 "yard": ((-4, 1.7, 36), (2, 2.0, 14), 22),
+                 "cabin": ((12, 1.7, -14), (22, 3.0, -30), 22),
+                 "barn": ((-26, 1.7, -8), (-22, 3.0, -28), 22)}},
 }
 
 
 def make_generators(style: str, index):
+    if style == "farm":
+        return None, FarmTerrain
     if style == "industrial":
         return IndustrialBuildingGenerator(index), IndustrialTerrain
     if style == "modern":
@@ -224,6 +234,8 @@ def stage_map(key: str, previews: bool):
     catalog=json.loads((SHARED/'props'/'props.json').read_text(encoding='utf8'))
     environment=interactive.map_data(layout,coll,catalog)
     groups = building_groups(layout)
+    from building import BuildingGenerator as _BG
+    _BG.poster_log.clear(); _BG.poster_counts.clear()
     town_col = exporter.collection(cfg["title"])
     bcol = exporter.collection("Buildings", town_col)
     block_files = []
@@ -247,6 +259,13 @@ def stage_map(key: str, previews: bool):
         block_files.append(f"buildings/{name}.glb")
         log(f"{name}: {len(group)} buildings, {path.stat().st_size // 1024} KB")
 
+    # Facade posters (blender/scripts/lib/building.py poster_pass): recorded for review and the placement tests.
+    poster_dir = ROOT / "docs" / "map-posters"
+    poster_dir.mkdir(parents=True, exist_ok=True)
+    import farmstead as _farm
+    facade_posters = list(_BG.poster_log) + _farm.posters(layout)
+    (poster_dir / f"{layout['id']}.json").write_text(json.dumps({"map": layout["id"], "facade": facade_posters}, indent=1), encoding="utf-8")
+    log("facade posters:", len(facade_posters))
     tcol = exporter.collection("Terrain", town_col)
     terrain = terrain_cls(layout).build()
     import underground

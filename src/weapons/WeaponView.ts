@@ -1,7 +1,9 @@
+import {WEAPONS} from './Weapon';
 import { cosmetic, defaultCosmetic, defaultEquipment, type Equipment } from '../../shared/cosmetics';
 import { loadCosmeticAsset, visualCosmetic } from '../rendering/CosmeticAssets';
 import {
   Color3,
+  Matrix,
   Mesh,
   MeshBuilder,
   PointLight,
@@ -22,6 +24,8 @@ import type { Weapon, WeaponAction, WeaponId } from './Weapon';
 import { WeaponMotion, type MotionInput } from './WeaponMotion';
 
 export const WEAPON_RENDER_GROUP = 1;
+/** Horizontal viewmodel FOV, independent of world/ADS/scope magnification. */
+export const VIEWMODEL_FOV = Math.PI / 2;
 
 type V3 = [number, number, number];
 /** Camera-space offset and rotation of the weapon: [dx, dy, dz, pitch (muzzle up), yaw (muzzle left), roll (top left)]. */
@@ -64,7 +68,7 @@ export const RIG_CONFIGS: Record<WeaponId, RigConfig> = {
     file: cosmetic(defaultCosmetic('shotgun'))!.asset.model,
     hip: [0.22, -0.235, -0.4],
     hipRot: [0.03, 0.09, -0.06],
-    eye: 0.2,
+    eye: 0.16,
     casing: 'casing_shell',
     flash: 1.5,
     kick: 2.6,
@@ -150,13 +154,17 @@ export class WeaponView {
   throwGrenade(): void { this.throwTime = .36; }
   readonly motion = new WeaponMotion();
   private hidden = false;
+  /** Dual daggers: how far the gun is lowered (0..1) and whether it is put away. */
+  private meleeLower = 0;
+  private meleeHidden = false;
   private savedNear: number | null = null;
+  private readonly viewmodelProjection = Matrix.Identity();
   private readonly beforeGroup;
   private readonly afterGroup;
   /** Every weapon mesh: excluded from the sun by the game. */
   readonly meshes: AbstractMesh[] = [];
   /** Last frame's pose, for tests. */
-  readonly debug = { action: 'idle' as WeaponAction, progress: 0, lower: 0, pump: 0, bolt: [0, 0] };
+  readonly debug = { action: 'idle' as WeaponAction, progress: 0, lower: 0, melee: 0, pump: 0, bolt: [0, 0] };
 
   constructor(
     private readonly ctx: RenderContext,
@@ -169,13 +177,16 @@ export class WeaponView {
     this.pivot = new TransformNode('weapon-pivot', scene);
     this.pivot.parent = this.root;
     scene.setRenderingAutoClearDepthStencil(WEAPON_RENDER_GROUP, true, true, false);
-    // The world needs its 10 cm near plane for distant depth precision; the
-    // camera-mounted stock/grip can legitimately sit closer. Change projection
-    // ONLY for the already depth-isolated weapon group, then restore it.
+    // Share the eye/view transform (including lean and recoil), but give guns,
+    // daggers and their effects a fixed horizontal projection. World FOV/ADS
+    // still control gameplay and scope magnification, never model placement.
     this.beforeGroup = scene.onBeforeRenderingGroupObservable.add(info => {
       if (info.renderingGroupId !== WEAPON_RENDER_GROUP || scene.activeCamera !== ctx.camera) return;
       this.savedNear = ctx.camera.minZ; ctx.camera.minZ = .012;
-      scene.setTransformMatrix(ctx.camera.getViewMatrix(), ctx.camera.getProjectionMatrix(true));
+      const engine = scene.getEngine();
+      Matrix.PerspectiveFovRHToRef(VIEWMODEL_FOV, engine.getAspectRatio(ctx.camera), .012, ctx.camera.maxZ,
+        this.viewmodelProjection, false, engine.isNDCHalfZRange, 0, engine.useReverseDepthBuffer);
+      scene.setTransformMatrix(ctx.camera.getViewMatrix(), this.viewmodelProjection);
     });
     this.afterGroup = scene.onAfterRenderingGroupObservable.add(info => {
       if (info.renderingGroupId !== WEAPON_RENDER_GROUP || this.savedNear === null) return;
@@ -318,7 +329,7 @@ export class WeaponView {
     this.current?.flash.setEnabled(false);
     this.current = rig;
     this.motion.reset();
-    rig.root.setEnabled(!this.hidden);
+    rig.root.setEnabled(!this.hidden && !this.meleeHidden);
   }
 
   get currentId(): WeaponId | null {
@@ -335,9 +346,9 @@ export class WeaponView {
   fire(): void {
     const rig = this.current;
     if (!rig) return;
-    this.motion.fire(rig.cfg.kick);
+    this.motion.fire(rig.cfg.kick*(rig.cfg.id==='sniper'?(WEAPONS.find(w=>w.id==='sniper')!.viewKick/16):1));
     this.flashTimer = 0.045;
-    rig.flash.setEnabled(!this.hidden);
+    rig.flash.setEnabled(!this.hidden && !this.meleeHidden);
     rig.flash.rotationQuaternion = Quaternion.RotationAxis(Vector3.Forward(), Math.random() * Math.PI * 2);
     rig.flash.scaling.setAll(0.85 + Math.random() * 0.35);
     if (this.flashLight) {
@@ -381,8 +392,18 @@ export class WeaponView {
   setHidden(hidden: boolean): void {
     if (hidden === this.hidden) return;
     this.hidden = hidden;
-    this.current?.root.setEnabled(!hidden);
+    this.current?.root.setEnabled(!hidden && !this.meleeHidden);
     if (hidden) this.current?.flash.setEnabled(false);
+  }
+
+  /** Dual daggers (MeleeView): the gun lowers out of view and is put away; switching back it
+   * rises from the same lowered pose. Cosmetic only; the weapon state machine is untouched. */
+  setMelee(lower: number, visible: boolean): void {
+    this.meleeLower = Math.max(0, Math.min(1, lower));
+    if (visible === !this.meleeHidden) return;
+    this.meleeHidden = !visible;
+    this.current?.root.setEnabled(!this.hidden && visible);
+    if (!visible) this.current?.flash.setEnabled(false);
   }
 
 
@@ -411,7 +432,7 @@ export class WeaponView {
     let rx = motion.pitch + hr[0] * (1 - ads);
     let ry = motion.yaw + hr[1] * (1 - ads);
     let rz = motion.roll + hr[2] * (1 - ads);
-    const wp = pose.weapon;
+    const wp = this.meleeLower > 0 ? pose.weapon.map((v, i) => v + DOWN[i] * smooth(this.meleeLower)) : pose.weapon;
     pos.x += wp[0];
     pos.y += wp[1];
     pos.z += wp[2];
@@ -438,7 +459,7 @@ export class WeaponView {
     Object.assign(this.debug, {
       action: w.action,
       progress: w.progress,
-      lower: -pose.weapon[1] + throwLower,
+      lower: -wp[1] + throwLower, melee: this.meleeLower,
       pump: pose.pump,
       bolt: pose.bolt,
     });
